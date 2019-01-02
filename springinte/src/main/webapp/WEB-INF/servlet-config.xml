@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans
+	http://www.springframework.org/schema/beans/spring-beans.xsd
+		http://www.springframework.org/schema/integration
+	http://www.springframework.org/schema/integration/spring-integration.xsd
+		http://www.springframework.org/schema/integration/http
+	http://www.springframework.org/schema/integration/http/spring-integration-http.xsd
+		http://www.springframework.org/schema/mvc
+	http://www.springframework.org/schema/mvc/spring-mvc-3.0.xsd"
+	xmlns:int="http://www.springframework.org/schema/integration"
+	xmlns:int-http="http://www.springframework.org/schema/integration/http"
+	xmlns:mvc="http://www.springframework.org/schema/mvc">
+
+    <!-- 本demo配置为通过spring integration 提供http  restful api服务 -->
+
+    <!-- 如无controller对应mvc请求处理，无需本配置-->
+    <mvc:annotation-driven />
+
+
+	<!-- http://ip:port/service?channel=  -->
+	<int-http:inbound-gateway request-channel="requestChannel"
+		name="/service" supported-methods="POST,GET" error-channel="errorChannel" />
+
+	<int:channel id="requestChannel" />
+
+	<int:chain input-channel="requestChannel" output-channel="routeChannel">
+		<int:header-enricher>
+			<int:header name="jsonp"
+				expression="payload.containsKey('jsonp')?payload.jsonp:''" />
+		</int:header-enricher>
+	</int:chain>
+
+  <!--  通过请求参数中的channel参数转发路由-->
+	<int:router input-channel="routeChannel" expression="payload.channel" />
+
+    <!-- spring int消息集成例子-->
+    <int:map-to-object-transformer
+            input-channel="SendSmsCodeRequest"
+                                   output-channel="getSmsCode" type="com.darren.demo.domain.SendSmsCodeRequest"/>
+    <int:channel id="getSmsCode" />
+    <int:service-activator input-channel="getSmsCode" ref="smsCodeApiService" method="getUserLoginSmsCode" output-channel="objectOut" />
+
+    <!-- 获取待支付订单-->
+    <int:map-to-object-transformer
+            input-channel="MyListingSellOrderRequest"
+            output-channel="getOrderWaitPay" type="com.darren.demo.domain.MyListingSellOrderRequest"/>
+    <int:channel id="getOrderWaitPay" />
+    <int:service-activator input-channel="getOrderWaitPay" ref="orderApiService" method="queryWaitPayOrders" output-channel="objectOut" />
+
+
+	<int:recipient-list-router input-channel="objectOut">
+		<int:recipient channel="jsonp" selector-expression="headers.jsonp!=''" />
+		<int:recipient channel="json" selector-expression="headers.jsonp==''" />
+	</int:recipient-list-router>
+
+	<int:channel id="json" />
+	<int:channel id="jsonp" />
+	<int:transformer input-channel="json" expression="payload" />
+	<int:object-to-json-transformer
+		input-channel="jsonp" output-channel="jsonHandler" />
+
+
+	<int:transformer input-channel="jsonHandler"
+		expression="headers.jsonp[0]+'('+(new String(payload.getBytes('utf-8'),'iso8859-1'))+')'" />
+
+
+	<int:transformer id="errorHandler" input-channel="errorChannel"
+		expression="'{ret:99999,msg:'+payload.cause.message+'}'" />
+</beans>
